@@ -1,13 +1,17 @@
 # FastAPI Resource Server
 
-Authenticate FastAPI with an OIDC Authorization Server.
+Build an OIDC resource server using FastAPI.
+
+Your aplication receives the claims decoded from the access token.
 
 # Usage
 
 Run keycloak on port 8888:
 
 ```sh
-docker run --name auth-server -p 8888:8080 jboss/keycloak:latest
+docker container run --name auth-server -d -p 8888:8080 \
+    -e KEYCLOAK_USER=admin -e KEYCLOAK_PASSWORD=admin \
+    jboss/keycloak:latest
 ```
 
 Install dependencies
@@ -22,15 +26,15 @@ Create the main.py module
 from fastapi import Depends, FastAPI, Security
 from pydantic import BaseModel
 
-from fastapi_resource_server import GrantType, JwtDecodeOptions, OidcResourceServer
+from fastapi_resource_server import JwtDecodeOptions, OidcResourceServer
 
 app = FastAPI()
 
 decode_options = JwtDecodeOptions(verify_aud=False)
+
 auth_scheme = OidcResourceServer(
     "http://localhost:8888/auth/realms/master",
     scheme_name="Keycloak",
-    allowed_grant_types=[GrantType.AUTHORIZATION_CODE, GrantType.IMPLICIT],
     jwt_decode_options=decode_options,
 )
 

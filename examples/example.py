@@ -5,12 +5,13 @@ from fastapi_resource_server import GrantType, JwtDecodeOptions, OidcResourceSer
 
 app = FastAPI()
 
+allowed_grant_types = [GrantType.AUTHORIZATION_CODE, GrantType.IMPLICIT]
 decode_options = JwtDecodeOptions(verify_aud=False)
+
 auth_scheme = OidcResourceServer(
-    # docker run --name auth-server -p 8888:8080 jboss/keycloak:latest
     "http://localhost:8888/auth/realms/master",
     scheme_name="Keycloak",
-    allowed_grant_types=[GrantType.AUTHORIZATION_CODE, GrantType.IMPLICIT],
+    allowed_grant_types=allowed_grant_types,
     jwt_decode_options=decode_options,
 )
 
