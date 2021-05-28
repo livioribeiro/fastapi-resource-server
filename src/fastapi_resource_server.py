@@ -12,9 +12,11 @@ from fastapi.openapi.models import (
     OAuthFlowPassword,
 )
 from fastapi.openapi.models import OAuthFlows as OAuthFlowsModel
-from fastapi.security.oauth2 import OAuth2
+from fastapi.openapi.models import OAuth2 as OAuth2Model
+from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 from jose import jwt
+from jose.exceptions import JWTError
 from pydantic import BaseModel
 from starlette.status import HTTP_401_UNAUTHORIZED
 
@@ -63,52 +65,54 @@ class JwtDecodeOptions(BaseModel):
     leeway: Optional[int]
 
 
-class OidcResourceServer(OAuth2):
+class OidcResourceServer(SecurityBase):
     def __init__(
         self,
         issuer: str,
-        scheme_name: Optional[str] = None,
         *,
+        scheme_name: Optional[str] = "OpenID Connect",
         allowed_grant_types: List[GrantType] = [GrantType.AUTHORIZATION_CODE],
         auto_error: Optional[bool] = True,
         jwt_decode_options: Optional[JwtDecodeOptions] = None,
     ) -> None:
+        self.scheme_name = scheme_name
+        self.auto_error = auto_error
+        self.jwt_decode_options = jwt_decode_options
+
         self.well_known = fetch_well_known(issuer)
         self.jwks = fetch_jwks(self.well_known)
-        self.jwt_decode_options = jwt_decode_options
 
         grant_types = set(self.well_known["grant_types_supported"])
         grant_types = grant_types.intersection(allowed_grant_types)
 
-        oauth2_flows = OAuthFlowsModel()
+        flows = OAuthFlowsModel()
 
         authz_url = self.well_known["authorization_endpoint"]
         token_url = self.well_known["token_endpoint"]
 
         if GrantType.AUTHORIZATION_CODE in grant_types:
-            oauth2_flows.authorizationCode = OAuthFlowAuthorizationCode(
+            flows.authorizationCode = OAuthFlowAuthorizationCode(
                 authorizationUrl=authz_url,
                 tokenUrl=token_url,
             )
 
         if GrantType.CLIENT_CREDENTIALS in grant_types:
-            oauth2_flows.clientCredentials = OAuthFlowClientCredentials(
+            flows.clientCredentials = OAuthFlowClientCredentials(
                 tokenUrl=token_url
             )
 
         if GrantType.PASSWORD in grant_types:
-            oauth2_flows.password = OAuthFlowPassword(tokenUrl=token_url)
+            flows.password = OAuthFlowPassword(tokenUrl=token_url)
 
         if GrantType.IMPLICIT in grant_types:
-            oauth2_flows.implicit = OAuthFlowImplicit(authorizationUrl=authz_url)
+            flows.implicit = OAuthFlowImplicit(authorizationUrl=authz_url)
 
-        super().__init__(
-            flows=oauth2_flows, scheme_name=scheme_name, auto_error=auto_error
-        )
+        self.model = OAuth2Model(flows=flows)
 
     async def __call__(self, request: Request) -> Optional[str]:
         authorization: str = request.headers.get("Authorization")
         scheme, param = get_authorization_scheme_param(authorization)
+
         if not authorization or scheme.lower() != "bearer":
             if self.auto_error:
                 raise HTTPException(
@@ -116,7 +120,14 @@ class OidcResourceServer(OAuth2):
                     detail="Not authenticated",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-            else:
-                return None
 
-        return jwt.decode(param, self.jwks, options=self.jwt_decode_options)
+            return None
+
+        try:
+            return jwt.decode(param, self.jwks, options=self.jwt_decode_options)
+        except JWTError:
+            raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="JWT validation failed",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
